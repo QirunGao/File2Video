@@ -5,6 +5,107 @@ use std::collections::HashMap;
 
 use crate::params::{META_MAGIC, META_VERSION, META_VERSION_LEGACY_CRC32};
 
+// ---------------------------------------------------------------------------
+// Block-level writeback: ChunkTracker (vNext-7 §2, §11)
+// ---------------------------------------------------------------------------
+
+/// Computes CRC32 of a chunk for early-stop detection (internal only).
+pub fn chunk_crc32(data: &[u8]) -> u32 {
+    crc32_bytes(data)
+}
+
+/// Tracks which source chunks have converged during decoding.
+pub struct ChunkTracker {
+    chunk_bytes: usize,
+    total_chunks: usize,
+    converged: Vec<bool>,
+    output: Vec<u8>,
+}
+
+impl ChunkTracker {
+    /// Create a new tracker. `total_source_len` is the full systematic byte length.
+    pub fn new(chunk_bytes: usize, total_source_len: usize) -> Self {
+        let total_chunks = if total_source_len == 0 {
+            0
+        } else {
+            (total_source_len + chunk_bytes - 1) / chunk_bytes
+        };
+        Self {
+            chunk_bytes,
+            total_chunks,
+            converged: vec![false; total_chunks],
+            output: vec![0u8; total_source_len],
+        }
+    }
+
+    /// Mark chunk `chunk_idx` as converged and write its data into the output buffer.
+    /// Returns `true` if this was a *new* convergence (first time for this chunk).
+    pub fn try_commit_chunk(&mut self, chunk_idx: usize, chunk_data: &[u8]) -> bool {
+        if chunk_idx >= self.total_chunks {
+            return false;
+        }
+        let was_new = !self.converged[chunk_idx];
+        self.converged[chunk_idx] = true;
+
+        let start = chunk_idx * self.chunk_bytes;
+        let end = (start + self.chunk_bytes).min(self.output.len());
+        let copy_len = (end - start).min(chunk_data.len());
+        self.output[start..start + copy_len].copy_from_slice(&chunk_data[..copy_len]);
+
+        was_new
+    }
+
+    /// Returns `true` when every chunk has converged.
+    pub fn all_converged(&self) -> bool {
+        self.converged.iter().all(|&c| c)
+    }
+
+    /// Index of the first chunk that has not yet converged (for window sliding / reclaim).
+    pub fn first_unconverged(&self) -> Option<usize> {
+        self.converged.iter().position(|&c| !c)
+    }
+
+    /// Read-only access to the accumulated output bytes.
+    pub fn output_bytes(&self) -> &[u8] {
+        &self.output
+    }
+
+    /// Number of chunks that have converged so far.
+    pub fn converged_count(&self) -> usize {
+        self.converged.iter().filter(|&&c| c).count()
+    }
+
+    /// Total number of chunks being tracked.
+    pub fn total_chunks(&self) -> usize {
+        self.total_chunks
+    }
+}
+
+/// Commit all chunks from decoded systematic bytes into a [`ChunkTracker`].
+///
+/// In single-pass decoding every chunk is treated as converged; future
+/// multi-pass decoders can refine convergence per-chunk.
+pub fn commit_chunks_from_decoded(
+    sys_bytes: &[u8],
+    chunk_bytes: usize,
+    r_meta: usize,
+) -> ChunkTracker {
+    let meta_region = recover_meta_from_prefix(sys_bytes, r_meta)
+        .map(|m| m.meta_len * r_meta)
+        .unwrap_or(0);
+    let data_bytes = &sys_bytes[meta_region.min(sys_bytes.len())..];
+    let mut tracker = ChunkTracker::new(chunk_bytes, data_bytes.len());
+
+    // Single-pass: mark every data chunk as converged
+    for idx in 0..tracker.total_chunks {
+        let start = idx * chunk_bytes;
+        let end = (start + chunk_bytes).min(data_bytes.len());
+        tracker.try_commit_chunk(idx, &data_bytes[start..end]);
+    }
+
+    tracker
+}
+
 const META_LEN_SHA256: usize = 46;
 const META_LEN_LEGACY_CRC32: usize = 18;
 pub const META_LEN_CURRENT: usize = META_LEN_SHA256;
@@ -235,5 +336,58 @@ mod tests {
         assert_eq!(meta.file_len, 123);
         assert_eq!(meta.meta_len, META_LEN_LEGACY_CRC32);
         assert_eq!(meta.file_integrity, FileIntegrity::LegacyCrc32(0xAABBCCDD));
+    }
+
+    #[test]
+    fn chunk_tracker_basic_functionality() {
+        let chunk_bytes = 8;
+        let total_len = 20; // 3 chunks: 8 + 8 + 4
+
+        let mut tracker = ChunkTracker::new(chunk_bytes, total_len);
+        assert_eq!(tracker.total_chunks(), 3);
+        assert!(!tracker.all_converged());
+        assert_eq!(tracker.first_unconverged(), Some(0));
+
+        // Commit chunk 0
+        assert!(tracker.try_commit_chunk(0, &[1u8; 8]));
+        assert!(!tracker.all_converged());
+        assert_eq!(tracker.first_unconverged(), Some(1));
+        assert_eq!(tracker.converged_count(), 1);
+
+        // Duplicate commit returns false
+        assert!(!tracker.try_commit_chunk(0, &[1u8; 8]));
+
+        // Commit chunk 2 (partial, last chunk)
+        assert!(tracker.try_commit_chunk(2, &[3u8; 4]));
+        assert_eq!(tracker.first_unconverged(), Some(1));
+
+        // Commit chunk 1
+        assert!(tracker.try_commit_chunk(1, &[2u8; 8]));
+        assert!(tracker.all_converged());
+        assert_eq!(tracker.first_unconverged(), None);
+
+        // Verify output
+        let out = tracker.output_bytes();
+        assert_eq!(&out[0..8], &[1u8; 8]);
+        assert_eq!(&out[8..16], &[2u8; 8]);
+        assert_eq!(&out[16..20], &[3u8; 4]);
+    }
+
+    #[test]
+    fn chunk_crc32_is_consistent() {
+        let data = b"hello world";
+        let c1 = super::chunk_crc32(data);
+        let c2 = super::chunk_crc32(data);
+        assert_eq!(c1, c2);
+        assert_ne!(c1, 0);
+    }
+
+    #[test]
+    fn commit_chunks_from_decoded_marks_all_converged() {
+        // No valid metadata prefix → meta_region=0, tracks all bytes as data
+        let data = vec![0xABu8; 100];
+        let tracker = commit_chunks_from_decoded(&data, 32, 1);
+        assert!(tracker.all_converged());
+        assert_eq!(tracker.output_bytes(), &data[..]);
     }
 }

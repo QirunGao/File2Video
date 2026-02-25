@@ -6,7 +6,7 @@ use crate::core::bitstream::{bits_to_bytes_msb, hard_llr_to_bits};
 use crate::core::fec::decode_systematic_ra_llr;
 use crate::core::mapper::{StreamBuffers, write_slot_llr_sequential};
 use crate::core::phy_channel::unpack_yuv420_to_slots;
-use crate::core::session::{extract_verified_payload, recover_meta_from_prefix};
+use crate::core::session::{commit_chunks_from_decoded, extract_verified_payload, recover_meta_from_prefix};
 use crate::params::{PROFILE_CFGS, cfg};
 
 pub fn decode(
@@ -59,11 +59,15 @@ pub fn decode(
 
     let (profile, sys_bytes, frames_total, frames_synced) =
         selected_profile.context("unable to lock profile from metadata prefix")?;
+
+    // Block-level convergence tracking (vNext-7 §2, §11)
+    let tracker = commit_chunks_from_decoded(&sys_bytes, profile.chunk_bytes, profile.r_meta);
+
     let payload = extract_verified_payload(&sys_bytes, profile.r_meta, best_effort)?;
     fs::write(&out, payload).with_context(|| format!("write output {:?}", out))?;
 
     eprintln!(
-        "decode(vnext7): profile={}, frames={}/{}, split=({},{}) bits, fec(z={},m={},q={}), window_chunks={}, heavy_geom={}, best_effort={}, profile_hint={}",
+        "decode(vnext7): profile={}, frames={}/{}, split=({},{}) bits, fec(z={},m={},q={}), window_chunks={}, heavy_geom={}, best_effort={}, profile_hint={}, chunks_converged={}/{}",
         profile.id,
         frames_synced,
         frames_total,
@@ -78,6 +82,8 @@ pub fn decode(
         profile_hint
             .map(|v| v.to_string())
             .unwrap_or_else(|| "auto".to_string()),
+        tracker.converged_count(),
+        tracker.total_chunks(),
     );
 
     Ok(())
