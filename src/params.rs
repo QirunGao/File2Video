@@ -44,6 +44,13 @@ impl ProfileCfg {
         if self.ra_repeat < 2 {
             bail!("invalid profile {}: ra_repeat must be >= 2", self.id);
         }
+        if self.b_sys % self.qc_z != 0 || self.b_par % self.qc_z != 0 {
+            bail!(
+                "invalid profile {}: b_sys and b_par must be multiples of qc_z ({})",
+                self.id,
+                self.qc_z
+            );
+        }
         if self.chunk_bytes == 0 {
             bail!("invalid profile {}: chunk_bytes must be > 0", self.id);
         }
