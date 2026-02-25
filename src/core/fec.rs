@@ -1,12 +1,21 @@
 use crate::core::bitstream::bytes_to_bits_msb;
 use crate::params::ProfileCfg;
 
+/// Hard decision: map LLR to bit (positive→0, negative→1).
+#[inline]
+fn llr_to_hard_bit(llr: f32) -> u8 {
+    if llr >= 0.0 { 0 } else { 1 }
+}
+
 pub struct FecEncoded {
     pub sys_stream: Vec<u8>,
     pub par_stream: Vec<u8>,
 }
 
 /// QC interleaving: cyclic-shift permutation within groups of size `z`.
+/// For partial trailing groups (len < z), the shift is still `gi % z` but
+/// the modular arithmetic uses `len` to keep indices in bounds; the inverse
+/// in `qc_deinterleave_llr` uses the same convention so the pair is consistent.
 fn qc_interleave(raw: &[u8], z: usize) -> Vec<u8> {
     let mut out = vec![0u8; raw.len()];
     for (gi, chunk) in raw.chunks(z).enumerate() {
@@ -109,10 +118,7 @@ pub fn decode_systematic_ra_llr(
     }
 
     // Hard decisions from systematic LLRs for SC coupling
-    let sys_hard: Vec<u8> = sys_llr
-        .iter()
-        .map(|&l| if l >= 0.0 { 0 } else { 1 })
-        .collect();
+    let sys_hard: Vec<u8> = sys_llr.iter().map(|&l| llr_to_hard_bit(l)).collect();
 
     let window_bits = profile
         .chunk_bytes

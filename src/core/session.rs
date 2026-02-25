@@ -9,7 +9,8 @@ use crate::params::{META_MAGIC, META_VERSION, META_VERSION_LEGACY_CRC32};
 // Block-level writeback: ChunkTracker (vNext-7 §2, §11)
 // ---------------------------------------------------------------------------
 
-/// Computes CRC32 of a chunk for early-stop detection (internal only).
+/// Computes CRC32 of a single decoded chunk for early-stop detection
+/// (architecture §11, §15-item 4: internal-only, does not enter the protocol).
 pub fn chunk_crc32(data: &[u8]) -> u32 {
     crc32_bytes(data)
 }
