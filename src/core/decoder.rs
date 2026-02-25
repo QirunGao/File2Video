@@ -44,7 +44,7 @@ pub fn decode(
         let post_sys_llr = decode_systematic_ra_llr(
             &buffers.sys_llr,
             &buffers.par_llr,
-            profile.chunk_bytes,
+            profile,
             window_chunks,
         );
         let sys_bits = hard_llr_to_bits(&post_sys_llr);
