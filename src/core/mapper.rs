@@ -3,22 +3,31 @@ use crate::params::ProfileCfg;
 
 #[derive(Default)]
 pub struct StreamBuffers {
-    pub sys_bits: Vec<u8>,
-    pub par_bits: Vec<u8>,
     pub sys_llr: Vec<f32>,
     pub par_llr: Vec<f32>,
 }
 
-pub fn build_slot_payloads(sys_stream: &[u8], par_stream: &[u8], profile: ProfileCfg) -> Vec<SlotPayloadBits> {
-    let slot_count = sys_stream.len().div_ceil(profile.b_sys).max(par_stream.len().div_ceil(profile.b_par));
+pub fn build_slot_payloads(
+    sys_stream: &[u8],
+    par_stream: &[u8],
+    profile: ProfileCfg,
+) -> Vec<SlotPayloadBits> {
+    let slot_count = sys_stream
+        .len()
+        .div_ceil(profile.b_sys)
+        .max(par_stream.len().div_ceil(profile.b_par));
     let mut slots = Vec::with_capacity(slot_count);
     for t in 0..slot_count {
         let sys_start = t * profile.b_sys;
         let par_start = t * profile.b_par;
         let mut sys_bits = vec![0u8; profile.b_sys];
         let mut par_bits = vec![0u8; profile.b_par];
-        let sys_n = profile.b_sys.min(sys_stream.len().saturating_sub(sys_start));
-        let par_n = profile.b_par.min(par_stream.len().saturating_sub(par_start));
+        let sys_n = profile
+            .b_sys
+            .min(sys_stream.len().saturating_sub(sys_start));
+        let par_n = profile
+            .b_par
+            .min(par_stream.len().saturating_sub(par_start));
         if sys_n > 0 {
             sys_bits[..sys_n].copy_from_slice(&sys_stream[sys_start..sys_start + sys_n]);
         }
@@ -30,7 +39,13 @@ pub fn build_slot_payloads(sys_stream: &[u8], par_stream: &[u8], profile: Profil
     slots
 }
 
-pub fn write_slot_llr_sequential(buffers: &mut StreamBuffers, slot: &SlotLlr, t: usize, profile: ProfileCfg, t_drop: f32) {
+pub fn write_slot_llr_sequential(
+    buffers: &mut StreamBuffers,
+    slot: &SlotLlr,
+    t: usize,
+    profile: ProfileCfg,
+    t_drop: f32,
+) {
     let sys_start = t * profile.b_sys;
     let par_start = t * profile.b_par;
 

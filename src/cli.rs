@@ -22,7 +22,7 @@ enum CommandCli {
         #[arg(long, default_value_t = 1088)]
         height: usize,
 
-        #[arg(long, default_value_t = 5)]
+        #[arg(long, default_value_t = 1)]
         profile: u8,
 
         #[arg(long, default_value_t = 0.20)]
@@ -34,6 +34,15 @@ enum CommandCli {
         input: PathBuf,
         #[arg(long)]
         out: PathBuf,
+
+        #[arg(long)]
+        profile: Option<u8>,
+
+        #[arg(long, default_value_t = 1920)]
+        width: usize,
+
+        #[arg(long, default_value_t = 1088)]
+        height: usize,
 
         #[arg(long, default_value_t = 256)]
         window_chunks: usize,
@@ -60,9 +69,21 @@ pub fn run() -> Result<()> {
         CommandCli::Decode {
             input,
             out,
+            profile,
+            width,
+            height,
             window_chunks,
             heavy_geom,
             best_effort,
-        } => crate::core::decoder::decode(input, out, window_chunks, heavy_geom, best_effort),
+        } => crate::core::decoder::decode(
+            input,
+            out,
+            profile,
+            width,
+            height,
+            window_chunks,
+            heavy_geom,
+            best_effort,
+        ),
     }
 }

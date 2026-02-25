@@ -1,12 +1,14 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::PathBuf;
 
 use crate::core::fec::encode_systematic_ra;
 use crate::core::mapper::build_slot_payloads;
-use crate::core::phy_channel::pack_slots_to_bytes;
-use crate::core::session::{build_meta_bytes, crc32_bytes, prefix_strengthen, StreamMeta};
-use crate::params::{cfg, Y_BLOCK};
+use crate::core::phy_channel::pack_slots_to_yuv420;
+use crate::core::session::{
+    FileIntegrity, META_LEN_CURRENT, StreamMeta, build_meta_bytes, prefix_strengthen, sha256_bytes,
+};
+use crate::params::{Y_BLOCK, cfg};
 
 pub fn encode(
     input: PathBuf,
@@ -32,7 +34,8 @@ pub fn encode(
     let meta = StreamMeta {
         profile: profile.id,
         file_len: data.len() as u64,
-        file_crc32: crc32_bytes(&data),
+        file_integrity: FileIntegrity::Sha256(sha256_bytes(&data)),
+        meta_len: META_LEN_CURRENT,
     };
 
     let meta_bytes = build_meta_bytes(&meta);
@@ -48,16 +51,23 @@ pub fn encode(
         }
     }
 
-    let out_bytes = pack_slots_to_bytes(&slots, profile);
+    let out_bytes = pack_slots_to_yuv420(&slots, width, height, profile)?;
     fs::write(&out, out_bytes).with_context(|| format!("write output {:?}", out))?;
 
+    let frames = slots.len().div_ceil(profile.slots_per_frame).max(1);
+
     eprintln!(
-        "encode(vnext7): profile={}, slots={}, split=({},{}) bits, pam={}, chunk_bytes={}, suggest_window={}",
+        "encode(vnext7): profile={}, frames={}, slots={}, slots_per_frame={}, split=({},{}) bits, pam={}, fec(z={},m={},q={}), chunk_bytes={}, suggest_window={}",
         profile.id,
+        frames,
         slots.len(),
+        profile.slots_per_frame,
         profile.b_sys,
         profile.b_par,
         profile.pam_order,
+        profile.qc_z,
+        profile.sc_memory,
+        profile.ra_repeat,
         profile.chunk_bytes,
         profile.window_chunks_suggest,
     );
