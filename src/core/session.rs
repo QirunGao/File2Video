@@ -29,7 +29,7 @@ impl ChunkTracker {
         let total_chunks = if total_source_len == 0 {
             0
         } else {
-            (total_source_len + chunk_bytes - 1) / chunk_bytes
+            total_source_len.div_ceil(chunk_bytes)
         };
         Self {
             chunk_bytes,
