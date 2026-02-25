@@ -1,0 +1,16 @@
+# Rust build output
+/target/
+/target_*/
+
+# IDE / project files (IntelliJ / RustRover)
+/.idea/
+/*.iml
+
+# Local agent scratch data
+/.codex_tmp/
+
+# Benchmark / test generated artifacts (repo root)
+/bench_*.yuv
+/bench_*.bin
+/bench_*.txt
+/bench_target_test/
