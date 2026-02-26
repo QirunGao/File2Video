@@ -41,7 +41,7 @@ pub fn encode(
     let meta_bytes = build_meta_bytes(&meta);
     let src = prefix_strengthen(&meta_bytes, &data, profile.r_meta);
 
-    let fec = encode_systematic_ra(&src);
+    let fec = encode_systematic_ra(&src, profile);
     let mut slots = build_slot_payloads(&fec.sys_stream, &fec.par_stream, profile);
 
     if max_overhead > 0.0 {
